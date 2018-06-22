@@ -21,7 +21,8 @@ import math
 
 
 class PriorProbability(keras.initializers.Initializer):
-    """ Apply a prior probability to the weights.
+    """
+    Initializer applies a prior probability.
     """
 
     def __init__(self, probability=0.01):

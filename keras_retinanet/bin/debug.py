@@ -31,6 +31,7 @@ if __name__ == "__main__" and __package__ is None:
 # Change these to absolute imports if you copy this script outside the keras_retinanet package.
 from ..preprocessing.pascal_voc import PascalVocGenerator
 from ..preprocessing.csv_generator import CSVGenerator
+from ..preprocessing.csv_multi_generator import CSVGeneratorMULTI
 from ..preprocessing.kitti import KittiGenerator
 from ..preprocessing.open_images import OpenImagesGenerator
 from ..utils.transform import random_transform_generator
@@ -38,11 +39,6 @@ from ..utils.visualization import draw_annotations, draw_boxes
 
 
 def create_generator(args):
-    """ Create the data generators.
-
-    Args:
-        args: parseargs arguments object.
-    """
     # create random transform generator for augmenting training data
     transform_generator = random_transform_generator(
         min_rotation=-0.1,
@@ -65,25 +61,35 @@ def create_generator(args):
             args.coco_path,
             args.coco_set,
             transform_generator=transform_generator,
-            image_min_side=args.image_min_side,
-            image_max_side=args.image_max_side
+            mean = args.mean,
+            normalize = args.normalize
         )
     elif args.dataset_type == 'pascal':
         generator = PascalVocGenerator(
             args.pascal_path,
             args.pascal_set,
             transform_generator=transform_generator,
-            image_min_side=args.image_min_side,
-            image_max_side=args.image_max_side
+            mean = args.mean,
+            normalize = args.normalize
         )
     elif args.dataset_type == 'csv':
         generator = CSVGenerator(
             args.annotations,
             args.classes,
+            base_dir=args.dataset_dir,
             transform_generator=transform_generator,
-            image_min_side=args.image_min_side,
-            image_max_side=args.image_max_side
+            mean = args.mean,
+            normalize = args.normalize
         )
+    elif args.dataset_type == 'csv_multi':
+        generator = CSVGeneratorMULTI(
+                args.annotations,
+                args.classes,
+                base_dir=args.dataset_dir,
+                transform_generator=transform_generator,
+                mean = args.mean,
+                normalize = args.normalize
+            )
     elif args.dataset_type == 'oid':
         generator = OpenImagesGenerator(
             args.main_dir,
@@ -93,16 +99,16 @@ def create_generator(args):
             fixed_labels=args.fixed_labels,
             annotation_cache_dir=args.annotation_cache_dir,
             transform_generator=transform_generator,
-            image_min_side=args.image_min_side,
-            image_max_side=args.image_max_side
+            mean = args.mean,
+            normalize = args.normalize
         )
     elif args.dataset_type == 'kitti':
         generator = KittiGenerator(
             args.kitti_path,
             subset=args.subset,
             transform_generator=transform_generator,
-            image_min_side=args.image_min_side,
-            image_max_side=args.image_max_side
+            mean = args.mean,
+            normalize = args.normalize
         )
     else:
         raise ValueError('Invalid data type received: {}'.format(args.dataset_type))
@@ -111,8 +117,6 @@ def create_generator(args):
 
 
 def parse_args(args):
-    """ Parse the arguments.
-    """
     parser     = argparse.ArgumentParser(description='Debug script for a RetinaNet network.')
     subparsers = parser.add_subparsers(help='Arguments for specific dataset types.', dest='dataset_type')
     subparsers.required = True
@@ -143,25 +147,24 @@ def parse_args(args):
     csv_parser = subparsers.add_parser('csv')
     csv_parser.add_argument('annotations', help='Path to CSV file containing annotations for evaluation.')
     csv_parser.add_argument('classes',     help='Path to a CSV file containing class label mapping.')
-
+    csv_parser.add_argument('--dataset_dir', help='path to the dataset', default=None)
+    
+    csv_multi_parser = subparsers.add_parser('csv_multi')
+    csv_multi_parser.add_argument('annotations', help='Path to CSV file containing annotations for training.')
+    csv_multi_parser.add_argument('classes', help='Path to a CSV file containing class label mapping.')
+    csv_multi_parser.add_argument('--dataset_dir', help='path to the dataset', default=None)
+    
     parser.add_argument('-l', '--loop', help='Loop forever, even if the dataset is exhausted.', action='store_true')
     parser.add_argument('--no-resize', help='Disable image resizing.', dest='resize', action='store_false')
     parser.add_argument('--anchors', help='Show positive anchors on the image.', action='store_true')
     parser.add_argument('--annotations', help='Show annotations on the image. Green annotations have anchors, red annotations don\'t and therefore don\'t contribute to training.', action='store_true')
     parser.add_argument('--random-transform', help='Randomly transform image and annotations.', action='store_true')
-    parser.add_argument('--image-min-side', help='Rescale the image so the smallest side is min_side.', type=int, default=800)
-    parser.add_argument('--image-max-side', help='Rescale the image if the largest side is larger than max_side.', type=int, default=1333)
-
+    parser.add_argument('--remove-mean', dest='mean', help='Preprocessing : remove mean, default False', type=bool, default=False)
+    parser.add_argument('--normalize', dest='norm', help='Preprocessing : normalize image, if 1 then value = [0, 1], if -1 then value = [-1, 1] else no normalization', type=int, default=0)
     return parser.parse_args(args)
 
 
 def run(generator, args):
-    """ Main loop.
-
-    Args
-        generator: The generator to debug.
-        args: parseargs args object.
-    """
     # display images, one at a time
     for i in range(generator.size()):
         # load the data

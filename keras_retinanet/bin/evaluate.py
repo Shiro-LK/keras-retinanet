@@ -6,7 +6,9 @@ Copyright 2017-2018 Fizyr (https://fizyr.com)
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
+
     http://www.apache.org/licenses/LICENSE-2.0
+
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,22 +32,19 @@ if __name__ == "__main__" and __package__ is None:
 # Change these to absolute imports if you copy this script outside the keras_retinanet package.
 from .. import models
 from ..preprocessing.csv_generator import CSVGenerator
+from ..preprocessing.csv_multi_generator import CSVGeneratorMULTI
 from ..preprocessing.pascal_voc import PascalVocGenerator
 from ..utils.eval import evaluate
 from ..utils.keras_version import check_keras_version
 
 
 def get_session():
-    """ Construct a modified tf session.
-    """
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     return tf.Session(config=config)
 
 
 def create_generator(args):
-    """ Create generators for evaluation.
-    """
     if args.dataset_type == 'coco':
         # import here to prevent unnecessary dependency on cocoapi
         from ..preprocessing.coco import CocoGenerator
@@ -54,22 +53,39 @@ def create_generator(args):
             args.coco_path,
             'val2017',
             image_min_side=args.image_min_side,
-            image_max_side=args.image_max_side
+            image_max_side=args.image_max_side,
+            mean = args.mean,
+            normalize = args.normalize
         )
     elif args.dataset_type == 'pascal':
         validation_generator = PascalVocGenerator(
             args.pascal_path,
             'test',
             image_min_side=args.image_min_side,
-            image_max_side=args.image_max_side
+            image_max_side=args.image_max_side,
+            mean = args.mean,
+            normalize = args.normalize
         )
     elif args.dataset_type == 'csv':
         validation_generator = CSVGenerator(
             args.annotations,
             args.classes,
+            base_dir=args.dataset_dir,
             image_min_side=args.image_min_side,
-            image_max_side=args.image_max_side
+            image_max_side=args.image_max_side,
+            mean = args.mean,
+            normalize = args.normalize
         )
+    elif args.dataset_type == 'csv_multi':
+        validation_generator = CSVGeneratorMULTI(
+                args.annotations,
+                args.classes,
+                base_dir=args.dataset_dir,
+                image_min_side=args.image_min_side,
+                image_max_side=args.image_max_side,
+                mean = args.mean,
+                normalize = args.normalize
+            )
     else:
         raise ValueError('Invalid data type received: {}'.format(args.dataset_type))
 
@@ -77,8 +93,6 @@ def create_generator(args):
 
 
 def parse_args(args):
-    """ Parse the arguments.
-    """
     parser     = argparse.ArgumentParser(description='Evaluation script for a RetinaNet network.')
     subparsers = parser.add_subparsers(help='Arguments for specific dataset types.', dest='dataset_type')
     subparsers.required = True
@@ -92,7 +106,13 @@ def parse_args(args):
     csv_parser = subparsers.add_parser('csv')
     csv_parser.add_argument('annotations', help='Path to CSV file containing annotations for evaluation.')
     csv_parser.add_argument('classes', help='Path to a CSV file containing class label mapping.')
-
+    csv_parser.add_argument('--dataset_dir', help='path to the dataset', default=None)
+    
+    csv_multi_parser = subparsers.add_parser('csv_multi')
+    csv_multi_parser.add_argument('annotations', help='Path to CSV file containing annotations for training.')
+    csv_multi_parser.add_argument('classes', help='Path to a CSV file containing class label mapping.')
+    csv_multi_parser.add_argument('--dataset_dir', help='path to the dataset', default=None)
+    
     parser.add_argument('model',             help='Path to RetinaNet model.')
     parser.add_argument('--convert-model',   help='Convert the model to an inference model (ie. the input is a training model).', action='store_true')
     parser.add_argument('--backbone',        help='The backbone of the model.', default='resnet50')
@@ -100,10 +120,11 @@ def parse_args(args):
     parser.add_argument('--score-threshold', help='Threshold on score to filter detections with (defaults to 0.05).', default=0.05, type=float)
     parser.add_argument('--iou-threshold',   help='IoU Threshold to count for a positive detection (defaults to 0.5).', default=0.5, type=float)
     parser.add_argument('--max-detections',  help='Max Detections per image (defaults to 100).', default=100, type=int)
-    parser.add_argument('--save-path',       help='Path for saving images with detections (doesn\'t work for COCO).')
+    parser.add_argument('--save-path',       help='Path for saving images with detections.')
     parser.add_argument('--image-min-side',  help='Rescale the image so the smallest side is min_side.', type=int, default=800)
     parser.add_argument('--image-max-side',  help='Rescale the image if the largest side is larger than max_side.', type=int, default=1333)
-
+    parser.add_argument('--remove-mean', dest='mean', help='Preprocessing : remove mean, default False', type=bool, default=False)
+    parser.add_argument('--normalize', dest='norm', help='Preprocessing : normalize image, if 1 then value = [0, 1], if -1 then value = [-1, 1] else no normalization', type=int, default=0)
     return parser.parse_args(args)
 
 
@@ -136,29 +157,19 @@ def main(args=None):
     # print(model.summary())
 
     # start evaluation
-    if args.dataset_type == 'coco':
-        from ..utils.coco_eval import evaluate_coco
-        evaluate_coco(generator, model, args.score_threshold)
-    else:
-        average_precisions = evaluate(
-            generator,
-            model,
-            iou_threshold=args.iou_threshold,
-            score_threshold=args.score_threshold,
-            max_detections=args.max_detections,
-            save_path=args.save_path
-        )
+    average_precisions = evaluate(
+        generator,
+        model,
+        iou_threshold=args.iou_threshold,
+        score_threshold=args.score_threshold,
+        max_detections=args.max_detections,
+        save_path=args.save_path
+    )
 
-        # print evaluation
-        present_classes = 0
-        precision = 0
-        for label, (average_precision, num_annotations) in average_precisions.items():
-            print('{:.0f} instances of class'.format(num_annotations),
-                  generator.label_to_name(label), 'with average precision: {:.4f}'.format(average_precision))
-            if(average_precision[1] > 0):
-                present_classes += 1
-                precision       += average_precision
-        print('mAP: {:.4f}'.format(precision / present_classes))
+    # print evaluation
+    for label, average_precision in average_precisions.items():
+        print(generator.label_to_name(label), '{:.4f}'.format(average_precision))
+    print('mAP: {:.4f}'.format(sum(average_precisions.values()) / len(average_precisions)))
 
 
 if __name__ == '__main__':

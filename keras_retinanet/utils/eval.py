@@ -24,6 +24,60 @@ import os
 
 import cv2
 
+# tensorboard
+import io
+from PIL import Image
+import tensorflow as tf
+
+def TensorboardImage(writer, image, number=0, step=0, channel=None):
+    '''
+        writer : buffer to write the image
+        images : image OPENCV format.  we cast in uint8 because need for tensorboard buffer format.
+        
+    '''
+    
+
+    height, width, c = image.shape
+    
+        
+    # temp = images[i,:,:,:]*255
+    temp = np.copy(image)
+    #if channel == 1:
+        #temp = np.expand_dims(temp, axis=-1)
+        
+    temp = temp.astype('uint8')
+    
+        
+    if channel is None:
+        output = io.BytesIO()
+        temp = temp[:, :, ::-1]
+        temp = Image.fromarray(temp)
+        temp.save(output, format='JPEG')
+        image_string = output.getvalue()
+        output.close()
+        img = tf.Summary.Image(height=height,
+                             width=width,
+                             colorspace=c,
+                             encoded_image_string=image_string)
+            #img = sess.run(tf.summary.image(name='image'+str(i), tensor=np.expand_dims(images[i,:,:,:], axis=0), max_outputs=1))
+    
+        summary =  tf.Summary(value=[tf.Summary.Value(tag='image_'+str(number), image=img )])
+        writer.add_summary(summary, step)
+    else:
+        output = io.BytesIO()
+        temp = temp[:, :, ::-1]
+        temp = Image.fromarray(temp)
+        temp.save(output, format='JPEG')
+        image_string = output.getvalue()
+        output.close()
+        img = tf.Summary.Image(height=height,
+                             width=width,
+                             colorspace=c,
+                             encoded_image_string=image_string)
+            #img = sess.run(tf.summary.image(name='image'+str(i), tensor=np.expand_dims(images[i,:,:,:], axis=0), max_outputs=1))
+    
+        summary =  tf.Summary(value=[tf.Summary.Value(tag='image_'+str(number)+'_channel_'+str(channel), image=img )])
+        writer.add_summary(summary, step)
 
 def _compute_ap(recall, precision):
     """ Compute the average precision, given the recall and precision curves.
@@ -54,7 +108,7 @@ def _compute_ap(recall, precision):
     return ap
 
 
-def _get_detections(generator, model, score_threshold=0.05, max_detections=100, save_path=None):
+def _get_detections(generator, model, score_threshold=0.05, max_detections=100, save_path=None, writer=None, steps=0, number=0, separate_channels=False):
     """ Get the detections from the model using the generator.
 
     The result is a list of lists such that the size is:
@@ -77,7 +131,7 @@ def _get_detections(generator, model, score_threshold=0.05, max_detections=100, 
         image, scale = generator.resize_image(image)
 
         # run network
-        boxes, scores, labels = model.predict_on_batch(np.expand_dims(image, axis=0))[:3]
+        boxes, scores, labels = model.predict_on_batch(np.expand_dims(image, axis=0))
 
         # correct boxes for image scale
         boxes /= scale
@@ -97,11 +151,23 @@ def _get_detections(generator, model, score_threshold=0.05, max_detections=100, 
         image_labels     = labels[0, indices[scores_sort]]
         image_detections = np.concatenate([image_boxes, np.expand_dims(image_scores, axis=1), np.expand_dims(image_labels, axis=1)], axis=1)
 
-        if save_path is not None:
+        if save_path is not None: # testing 
             draw_annotations(raw_image, generator.load_annotations(i), label_to_name=generator.label_to_name)
             draw_detections(raw_image, image_boxes, image_scores, image_labels, label_to_name=generator.label_to_name)
-
             cv2.imwrite(os.path.join(save_path, '{}.png'.format(i)), raw_image)
+        else: # training
+            if writer is not None and i<number:
+                if separate_channels:
+                    _, _, channel = raw_image.shape
+                    for chan in range(0, channel):
+                        img = np.repeat(np.expand_dims(raw_image[:,:,chan], axis=2), 3, axis=2)
+                        draw_annotations(img, generator.load_annotations(i), label_to_name=generator.label_to_name)
+                        draw_detections(img, image_boxes, image_scores, image_labels, label_to_name=generator.label_to_name)
+                        TensorboardImage(writer=writer, image=img, number=i, step=steps, channel=chan)
+                else:
+                    draw_annotations(raw_image, generator.load_annotations(i), label_to_name=generator.label_to_name)
+                    draw_detections(raw_image, image_boxes, image_scores, image_labels, label_to_name=generator.label_to_name)
+                    TensorboardImage(writer=writer, image=raw_image, number=i, step=steps, channel=None)
 
         # copy detections to all_detections
         for label in range(generator.num_classes()):
@@ -144,7 +210,11 @@ def evaluate(
     iou_threshold=0.5,
     score_threshold=0.05,
     max_detections=100,
-    save_path=None
+    save_path=None,
+    writer=None,
+    steps=0,
+    number=0,
+    separate_channels=False
 ):
     """ Evaluate a given dataset using a given model.
 
@@ -159,7 +229,7 @@ def evaluate(
         A dict mapping class names to mAP scores.
     """
     # gather all detections and annotations
-    all_detections     = _get_detections(generator, model, score_threshold=score_threshold, max_detections=max_detections, save_path=save_path)
+    all_detections     = _get_detections(generator, model, score_threshold=score_threshold, max_detections=max_detections, save_path=save_path, writer=writer, steps=steps, number=number, separate_channels=separate_channels)
     all_annotations    = _get_annotations(generator)
     average_precisions = {}
 
@@ -203,7 +273,7 @@ def evaluate(
 
         # no annotations -> AP for this class is 0 (is this correct?)
         if num_annotations == 0:
-            average_precisions[label] = 0, 0
+            average_precisions[label] = 0
             continue
 
         # sort by score
@@ -221,6 +291,6 @@ def evaluate(
 
         # compute average precision
         average_precision  = _compute_ap(recall, precision)
-        average_precisions[label] = average_precision, num_annotations
+        average_precisions[label] = average_precision
 
     return average_precisions
