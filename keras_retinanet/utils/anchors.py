@@ -113,6 +113,7 @@ def anchors_for_shape(
     sizes=None,
     shapes_callback=None,
 ):
+    #print('Anchor for shape fuction :', ratios, scales, strides, pyramid_levels, sizes)
     if pyramid_levels is None:
         pyramid_levels = [3, 4, 5, 6, 7]
     if strides is None:
@@ -168,9 +169,11 @@ def generate_anchors(base_size=16, ratios=None, scales=None):
     """
 
     if ratios is None:
+        print('\n load default ratio \n')
         ratios = np.array([0.5, 1, 2])
 
     if scales is None:
+        print('\n load default scales \n')
         scales = np.array([2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)])
 
     num_anchors = len(ratios) * len(scales)

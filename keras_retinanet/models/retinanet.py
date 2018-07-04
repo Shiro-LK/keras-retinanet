@@ -113,7 +113,7 @@ def default_regression_model(num_anchors, pyramid_feature_size=256, regression_f
     return keras.models.Model(inputs=inputs, outputs=outputs, name=name)
 
 
-def __create_pyramid_features(C3, C4, C5, feature_size=256):
+def __create_pyramid_features(C2, C3, C4, C5, feature_size=256):
     """ Creates the FPN layers on top of the backbone features.
 
     Args
@@ -139,17 +139,25 @@ def __create_pyramid_features(C3, C4, C5, feature_size=256):
     # add P4 elementwise to C3
     P3 = keras.layers.Conv2D(feature_size, kernel_size=1, strides=1, padding='same', name='C3_reduced')(C3)
     P3 = keras.layers.Add(name='P3_merged')([P4_upsampled, P3])
+    if C2 is not None:
+        P3_upsampled = layers.UpsampleLike(name='P3_upsampled')([P3, C2])
     P3 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=1, padding='same', name='P3')(P3)
-
+    
+    if C2 is not None:
+        P2 = keras.layers.Conv2D(feature_size, kernel_size=1, strides=1, padding='same', name='C2_reduced')(C2)
+        P2 = keras.layers.Add(name='P2_merged')([P3_upsampled, P2])
+        P2 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=1, padding='same', name='P2')(P2) 
+    
     # "P6 is obtained via a 3x3 stride-2 conv on C5"
     P6 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=2, padding='same', name='P6')(C5)
 
     # "P7 is computed by applying ReLU followed by a 3x3 stride-2 conv on P6"
     P7 = keras.layers.Activation('relu', name='C6_relu')(P6)
     P7 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=2, padding='same', name='P7')(P7)
-
-    return [P3, P4, P5, P6, P7]
-
+    if C2 is None:
+        return [P3, P4, P5, P6, P7]
+    else:
+        return [P2, P3, P4, P5, P6, P7]
 
 class AnchorParameters:
     """ The parameteres that define how anchors are generated.
@@ -285,13 +293,18 @@ def retinanet(
         ]
         ```
     """
+    print('model -> number anchors :', num_anchors)
     if submodels is None:
         submodels = default_submodels(num_classes, num_anchors)
 
-    C3, C4, C5 = backbone_layers
-
-    # compute pyramid features as per https://arxiv.org/abs/1708.02002
-    features = create_pyramid_features(C3, C4, C5)
+    if len(backbone_layers) == 4:
+        C2, C3, C4, C5 = backbone_layers
+        # compute pyramid features as per https://arxiv.org/abs/1708.02002
+        features = create_pyramid_features(C2, C3, C4, C5)
+    else:
+        C3, C4, C5 = backbone_layers
+        # compute pyramid features as per https://arxiv.org/abs/1708.02002
+        features = create_pyramid_features(None, C3, C4, C5)
 
     # for all pyramid levels, run available submodels
     pyramids = __build_pyramid(submodels, features)
@@ -301,9 +314,10 @@ def retinanet(
 
 def retinanet_bbox(
     model             = None,
-    anchor_parameters = AnchorParameters.default,
+    anchor_parameters = None,
     nms               = True,
     name              = 'retinanet-bbox',
+    P2_layer          = False,
     **kwargs
 ):
     """ Construct a RetinaNet model on top of a backbone and adds convenience functions to output boxes directly.
@@ -327,11 +341,17 @@ def retinanet_bbox(
         ]
         ```
     """
+    if anchor_parameters is None:
+        print('load anchor parameters by default')
+        anchor_parameters = AnchorParameters.default
     if model is None:
         model = retinanet(num_anchors=anchor_parameters.num_anchors(), **kwargs)
 
     # compute the anchors
-    features = [model.get_layer(p_name).output for p_name in ['P3', 'P4', 'P5', 'P6', 'P7']]
+    if P2_layer:
+        features = [model.get_layer(p_name).output for p_name in ['P2', 'P3', 'P4', 'P5', 'P6', 'P7']]
+    else:
+        features = [model.get_layer(p_name).output for p_name in ['P3', 'P4', 'P5', 'P6', 'P7']]
     anchors  = __build_anchors(anchor_parameters, features)
 
     # we expect the anchors, regression and classification values as first output

@@ -44,9 +44,8 @@ class Generator(object):
         image_min_side=800,
         image_max_side=1333,
         transform_parameters=None,
-        mean=False,
-        normalize=0,
         compute_anchor_targets=anchor_targets_bbox,
+        args= None,
     ):
         self.transform_generator    = transform_generator
         self.batch_size             = int(batch_size)
@@ -61,8 +60,16 @@ class Generator(object):
         self.lock        = threading.Lock()
 
         self.group_images()
-        self.mean = mean
-        self.normalize=normalize
+        self.mean = args.mean
+        self.normalize = int(args.norm)
+        
+        ## add P2 layer
+        self.P2_layer = args.P2
+        self.anchor_ratio = args.ratio
+        self.anchor_scale = args.scale
+        self.pyramid_levels = args.pyramid_levels
+        self.anchor_stride = args.stride
+        self.anchor_size = args.size
     def size(self):
         raise NotImplementedError('size method not implemented')
 
@@ -199,6 +206,11 @@ class Generator(object):
                 annotations,
                 self.num_classes(),
                 mask_shape=image.shape,
+                pyramid_levels=self.pyramid_levels,
+                ratios=self.anchor_ratio,
+                scales=self.anchor_scale,
+                strides=self.anchor_stride,
+                sizes=self.anchor_size,
             )
             regression_group[index] = bbox_transform(anchors, annotations)
 

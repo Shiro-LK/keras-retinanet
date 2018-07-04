@@ -36,11 +36,12 @@ class Backbone(object):
         raise NotImplementedError('validate method not implemented.')
 
 
-def backbone(backbone_name):
+def backbone(backbone_name, P2=False):
     """ Returns a backbone object for the given backbone.
     """
     if 'resnet' in backbone_name:
         from .resnet import ResNetBackbone as b
+        return b(backbone_name, P2_layer=P2)
     elif 'mobilenet' in backbone_name:
         from .mobilenet import MobileNetBackbone as b
     elif 'vgg' in backbone_name:

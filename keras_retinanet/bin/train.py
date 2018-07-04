@@ -39,7 +39,7 @@ from .. import losses
 from .. import models
 from ..callbacks import RedirectModel
 from ..callbacks.eval import Evaluate
-from ..models.retinanet import retinanet_bbox
+from ..models.retinanet import retinanet_bbox, AnchorParameters
 from ..preprocessing.csv_generator import CSVGenerator
 from ..preprocessing.csv_generator_multi import CSVGeneratorMULTI
 from ..preprocessing.kitti import KittiGenerator
@@ -67,7 +67,8 @@ def makedirs(path):
         if not os.path.isdir(path):
             raise
 
-
+def list_callbacks(parse):
+    return np.array([eval(s) for s in parse.split(',')])
 def get_session():
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -80,21 +81,22 @@ def model_with_weights(model, weights, skip_mismatch):
     return model
 
 
-def create_models(backbone_retinanet, num_classes, weights, multi_gpu=0, freeze_backbone=False, shape=(None, None, 3), opt=keras.optimizers.adam(lr=1e-5, clipnorm=0.001)):
+def create_models(backbone_retinanet, num_classes, weights, args, multi_gpu=0, freeze_backbone=False, shape=(None, None, 3), opt=keras.optimizers.adam(lr=1e-5, clipnorm=0.001)):
     modifier = freeze_model if freeze_backbone else None
 
     # Keras recommends initialising a multi-gpu model on the CPU to ease weight sharing, and to prevent OOM errors.
     # optionally wrap in a parallel model
     if multi_gpu > 1:
         with tf.device('/cpu:0'):
-            model = model_with_weights(backbone_retinanet(num_classes, modifier=modifier, shape=shape), weights=weights, skip_mismatch=True)
+            model = model_with_weights(backbone_retinanet(num_classes, modifier=modifier, shape=shape, num_anchors=len(args.ratio)*len(args.scale)), weights=weights, skip_mismatch=True)
         training_model = multi_gpu_model(model, gpus=multi_gpu)
     else:
-        model          = model_with_weights(backbone_retinanet(num_classes, modifier=modifier, shape=shape), weights=weights, skip_mismatch=True)
+        model          = model_with_weights(backbone_retinanet(num_classes, modifier=modifier, shape=shape, num_anchors=len(args.ratio)*len(args.scale)), weights=weights, skip_mismatch=True)
         training_model = model
 
     # make prediction model
-    prediction_model = retinanet_bbox(model=model)
+    anchors_param = AnchorParameters(sizes=args.size, strides=args.stride, ratios=args.ratio, scales=args.scale)
+    prediction_model = retinanet_bbox(model=model, anchor_parameters=anchors_param, P2_layer=args.P2)
 
     # compile model
     training_model.compile(
@@ -209,8 +211,7 @@ def create_generators(args):
             batch_size=args.batch_size,
             image_min_side=args.image_min_side,
             image_max_side=args.image_max_side,
-            mean = args.mean,
-            normalize = args.norm
+            args=args,
         )
 
         validation_generator = CocoGenerator(
@@ -219,8 +220,7 @@ def create_generators(args):
             batch_size=args.batch_size,
             image_min_side=args.image_min_side,
             image_max_side=args.image_max_side,
-            mean = args.mean,
-            normalize = args.norm
+            args=args,
         )
     elif args.dataset_type == 'pascal':
         train_generator = PascalVocGenerator(
@@ -230,8 +230,7 @@ def create_generators(args):
             batch_size=args.batch_size,
             image_min_side=args.image_min_side,
             image_max_side=args.image_max_side,
-            mean = args.mean,
-            normalize = args.norm
+            args=args,
         )
 
         validation_generator = PascalVocGenerator(
@@ -240,8 +239,7 @@ def create_generators(args):
             batch_size=args.batch_size,
             image_min_side=args.image_min_side,
             image_max_side=args.image_max_side,
-            mean = args.mean,
-            normalize = args.norm
+            args=args,
         )
     elif args.dataset_type == 'csv':
         train_generator = CSVGenerator(
@@ -252,8 +250,7 @@ def create_generators(args):
             batch_size=args.batch_size,
             image_min_side=args.image_min_side,
             image_max_side=args.image_max_side,
-            mean = args.mean,
-            normalize = args.norm
+            args=args,
         )
         print('training generator loaded')
         if args.val_annotations:
@@ -264,8 +261,7 @@ def create_generators(args):
                 batch_size=args.batch_size,
                 image_min_side=args.image_min_side,
                 image_max_side=args.image_max_side,
-                mean = args.mean,
-                normalize = args.norm
+                args=args,
             )
             print('validating generator loaded')
         else:
@@ -279,8 +275,7 @@ def create_generators(args):
             batch_size=args.batch_size,
             image_min_side=args.image_min_side,
             image_max_side=args.image_max_side,
-            mean = args.mean,
-            normalize = int(args.norm)
+            args=args,
         )
 
         if args.val_annotations:
@@ -291,8 +286,7 @@ def create_generators(args):
                 batch_size=args.batch_size,
                 image_min_side=args.image_min_side,
                 image_max_side=args.image_max_side,
-                mean = args.mean,
-                normalize = int(args.norm)
+                args=args,
             )
         else:
             validation_generator = None
@@ -309,8 +303,7 @@ def create_generators(args):
             batch_size=args.batch_size,
             image_min_side=args.image_min_side,
             image_max_side=args.image_max_side,
-            mean = args.mean,
-            normalize = args.norm
+            args=args,
         )
 
         validation_generator = OpenImagesGenerator(
@@ -323,8 +316,7 @@ def create_generators(args):
             batch_size=args.batch_size,
             image_min_side=args.image_min_side,
             image_max_side=args.image_max_side,
-            mean = args.mean,
-            normalize = args.norm
+            args=args,
         )
     elif args.dataset_type == 'kitti':
         train_generator = KittiGenerator(
@@ -334,8 +326,7 @@ def create_generators(args):
             batch_size=args.batch_size,
             image_min_side=args.image_min_side,
             image_max_side=args.image_max_side,
-            mean = args.mean,
-            normalize = args.norm
+            args=args,
         )
 
         validation_generator = KittiGenerator(
@@ -344,8 +335,7 @@ def create_generators(args):
             batch_size=args.batch_size,
             image_min_side=args.image_min_side,
             image_max_side=args.image_max_side,
-            mean = args.mean,
-            normalize = args.norm
+            args=args,
         )
     else:
         raise ValueError('Invalid data type received: {}'.format(args.dataset_type))
@@ -396,7 +386,10 @@ def check_args(parsed_args):
 
     if 'resnet' not in parsed_args.backbone:
         warnings.warn('Using experimental backbone {}. Only resnet50 has been properly tested.'.format(parsed_args.backbone))
-        
+     
+    parsed_args.pyramid_levels = [2, 3, 4, 5, 6, 7] if parsed_args.P2 else [3, 4, 5, 6, 7]
+    parsed_args.stride = [2 ** x for x in parsed_args.pyramid_levels]
+    parsed_args.size = [2 ** (x + 2) for x in parsed_args.pyramid_levels]
     return parsed_args
 
 
@@ -460,13 +453,16 @@ def parse_args(args):
     parser.add_argument('--channels', dest="channels", help='Number of channels in the input data', type=int, default=3)
     parser.add_argument('--remove-mean', dest='mean', help='Preprocessing : remove mean, default False', default='False')
     parser.add_argument('--normalize', dest='norm', help='Preprocessing : normalize image, if 1 then value = [0, 1], if -1 then value = [-1, 1] else no normalization', type=int, default=0)
-    parser.add_argument('--optimizer', dest="optimizer", help='choose optimizer : sgd, adam, rmsprop, adagrad, adadelta, adamax, nadam. default=adam', default='adam')   
-    parser.add_argument('--lr', dest='lr',  help='Choose learning rate value, default = 0.00001.', type=float, default=1e-5)
-    parser.add_argument('--clip-norm', dest='clip_norm',  help='Choose clip norm value, default = 0.00001.', type=float, default=0.001)
-    parser.add_argument('--name', dest='name',  help='Choose name of your saved file, default = 0.00001.', default=None)
-    parser.add_argument('--tensorboxes', dest='tensorboxes',  help='Number of images to store on tensorboard', type=int, default=0)
-    parser.add_argument('--tensorboxes-channels', dest='tensorboxes_channels',  help='display each channels on tensorboard. If --channels is different from 3, True forced.', type=bool, default=False)
-    parser.add_argument('--use-val-loss', dest='val_loss',  help='Compute validation loss', type=bool, default=False)
+    parser.add_argument('--optimizer', help='choose optimizer : sgd, adam, rmsprop, adagrad, adadelta, adamax, nadam. default=adam', default='adam')   
+    parser.add_argument('--lr',  help='Choose learning rate value, default = 0.00001.', type=float, default=1e-5)
+    parser.add_argument('--clip-norm',  help='Choose clip norm value, default = 0.00001.', type=float, default=0.001)
+    parser.add_argument('--name',  help='Choose name of your saved file, default = 0.00001.', default=None)
+    parser.add_argument('--tensorboxes', help='Number of images to store on tensorboard', type=int, default=0)
+    parser.add_argument('--tensorboxes-channels', help='display each channels on tensorboard. If --channels is different from 3, True forced.', action='store_true')
+    parser.add_argument('--use-val-loss', dest='val_loss',  help='Compute validation loss', action='store_true')
+    parser.add_argument('--use-P2', dest='P2', help='Use P2 layer (more consuming) for training and testing in the FPN (only for resnet).', action='store_true')
+    parser.add_argument('--scale', help='list of the scale use in the network.', type=list_callbacks, default='2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)')
+    parser.add_argument('--ratio', help='list of the ratio use in the network.', type=list_callbacks, default='0.5, 1, 2')
     return check_args(parser.parse_args(args))
 
 
@@ -475,12 +471,13 @@ def main(args=None):
     if args is None:
         args = sys.argv[1:]
     args = parse_args(args)
-    args.mean = False if args.mean =='False' else True
+    
     if args.channels != 3:
         args.tensorboxes_channels = True
+    print('ratio : ', args.ratio, 'scale :', args.scale, 'P2 : ', args.P2, 'pyramid levels : ', args.pyramid_levels, ' stride :', args.stride, 'sizes : ', args.size)
     writer = tf.summary.FileWriter(args.tensorboard_dir+'/image')
     # create object that stores backbone information
-    backbone = models.backbone(args.backbone)
+    backbone = models.backbone(args.backbone, P2=args.P2)
     if args.name is None:
         args.name = args.backbone
     # make sure keras is the minimum required version
@@ -501,7 +498,8 @@ def main(args=None):
         print('Loading model, this may take a second...')
         model            = models.load_model(args.snapshot, backbone_name=args.backbone)
         training_model   = model
-        prediction_model = retinanet_bbox(model=model)
+        anchors_param = AnchorParameters(sizes=args.size, strides=args.stride, ratios=args.ratio, scales=args.scale)
+        prediction_model = retinanet_bbox(model=model, anchor_parameters=anchors_param, P2_layer=args.P2)
     else:
         weights = args.weights
         # default to imagenet if nothing else is specified
@@ -513,6 +511,7 @@ def main(args=None):
             backbone_retinanet=backbone.retinanet,
             num_classes=train_generator.num_classes(),
             weights=weights,
+            args=args,
             multi_gpu=args.multi_gpu,
             freeze_backbone=args.freeze_backbone,
             shape=(None, None, int(args.channels)),
