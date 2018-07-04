@@ -19,7 +19,7 @@ limitations under the License.
 import argparse
 import os
 import sys
-
+import numpy as np
 # Allow relative imports when being executed as script.
 if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -30,6 +30,13 @@ if __name__ == "__main__" and __package__ is None:
 from .. import models
 
 
+def list_callbacks(parse):
+    return np.array([eval(s) for s in parse.split(',')])
+
+def boolean_string(parse):
+    if parse not in {'False', 'True'}:
+        return None
+    return parse == 'True'
 def parse_args(args):
     parser = argparse.ArgumentParser(description='Script for converting a training model to an inference model.')
 
@@ -37,6 +44,9 @@ def parse_args(args):
     parser.add_argument('model_out', help='Path to save the converted model to.')
     parser.add_argument('--backbone', help='The backbone of the model to convert.', default='resnet50')
     parser.add_argument('--no-nms', help='Disables non maximum suppression.', dest='nms', action='store_false')
+    parser.add_argument('--use-P2', help='Use P2 layer in the network for prediction.', dest='P2', type=boolean_string, default=None)
+    parser.add_argument('--scales', help='Choose the different scales for the anchor.', dest='scales', type=list_callbacks, default='2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)')
+    parser.add_argument('--ratios', help='Choose the different ratios for the anchor.', dest='ratios', type=list_callbacks, default='0.5,1,2')
 
     return parser.parse_args(args)
 
@@ -47,8 +57,17 @@ def main(args=None):
         args = sys.argv[1:]
     args = parse_args(args)
 
+    print('P2 : ', args.P2)
+    print(args.scales, args.ratios)
     # load and convert model
-    model = models.load_model(args.model_in, convert=True, backbone_name=args.backbone, nms=args.nms)
+    if args.P2 is not None:
+        pyramid_levels = [2, 3, 4, 5, 6, 7] if args.P2 == True else [3, 4, 5, 6, 7]
+        strides = [2 ** x for x in pyramid_levels]
+        sizes = [2 ** (x + 2) for x in pyramid_levels]
+        model = models.load_model(args.model_in, convert=True, backbone_name=args.backbone, nms=args.nms, P2_layer=args.P2, sizes=sizes, strides=strides, ratios=args.ratios, scales=args.scales)      
+    else:
+    
+        model = models.load_model(args.model_in, convert=True, backbone_name=args.backbone, nms=args.nms)
 
     # save model
     model.save(args.model_out)
