@@ -1,5 +1,7 @@
 # Keras RetinaNet [![Build Status](https://travis-ci.org/fizyr/keras-retinanet.svg?branch=master)](https://travis-ci.org/fizyr/keras-retinanet) [![DOI](https://zenodo.org/badge/100249425.svg)](https://zenodo.org/badge/latestdoi/100249425)
 
+This repository is a fork from fizyr/keras-retinanet. I add some features like the possibility to use the P2 feature maps, display images on tensorboard (validation), the possibility to use multi channel as input (see csv_multi file)
+
 Keras implementation of RetinaNet object detection as described in [Focal Loss for Dense Object Detection](https://arxiv.org/abs/1708.02002)
 by Tsung-Yi Lin, Priya Goyal, Ross Girshick, Kaiming He and Piotr Dollár.
 
@@ -182,6 +184,25 @@ This defines a dataset with 3 images.
 `img_002.jpg` contains a cat and a bird.
 `img_003.jpg` contains no interesting objects/animals.
 
+## CSV multi channels datasets
+The `CSVGenerator` provides an easy way to define your own datasets.
+It uses two CSV files: one file containing annotations and one file containing a class name to ID mapping.
+
+### Annotations format
+The CSV file with annotations should contain one annotation per line.
+Images with multiple bounding boxes should use one row per bounding box.
+Note that indexing for pixel values starts at 0.
+The expected format of each line is:
+```
+path/to/image.jpg,widht, height,x1,y1,x2,y2,class_name
+```
+
+Some images may not contain any labeled objects.
+To add these images to the dataset as negative examples,
+add an annotation where `x1`, `y1`, `x2`, `y2` and `class_name` are all empty:
+```
+path/to/image.jpg,,,,,,,
+```
 
 ### Class mapping format
 The class name to ID mapping file should contain one mapping per line.
